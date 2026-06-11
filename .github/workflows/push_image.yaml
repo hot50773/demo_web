@@ -4,62 +4,27 @@ on:
   workflow_dispatch:
 
 env:
-  # Global constants
-  K8S_REPO_OWNER: "hot50773"
-  K8S_REPO_NAME: "devops"
   PLATFORM: "linux/amd64"
+  SERVICE_NAME: "demo-web"
   GAR_REGISTRY: ${{ secrets.GAR_REGISTRY }}
   WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
   SERVICE_ACCOUNT: ${{ secrets.SERVICE_ACCOUNT }}
 
 jobs:
-  set-environment:
-    name: "Set Target Environment"
-    runs-on: ubuntu-latest
-    outputs:
-      env_name: ${{ steps.map.outputs.env_name }}
-    steps:
-      - id: map
-        run: |
-          echo "Checking branch: ${{ github.ref_name }}"
-          if [[ "${{ github.ref_name }}" == "main" ]]; then
-            echo "env_name=production" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref_name }}" == "staging" ]]; then
-            echo "env_name=staging" >> $GITHUB_OUTPUT
-          else
-            echo "Error: Branch ${{ github.ref_name }} is not mapped to an environment."
-            exit 1
-          fi
-
   build-and-push:
     name: "Build and Push Docker Image"
-    needs: set-environment
     runs-on: ubuntu-latest
-    environment: ${{ needs.set-environment.outputs.env_name }}
-    
-    env:
-      SERVICE_NAME: ${{ vars.SERVICE_NAME }}
-
-    outputs:
-      full_image_path: ${{ steps.prep.outputs.full_image_path }}
 
     permissions:
       contents: 'read'
       id-token: 'write'
-    
+
     steps:
       - name: "Checkout Code"
         uses: actions/checkout@v6
 
       - name: "Set up Docker Buildx"
         uses: docker/setup-buildx-action@v4
-
-      - name: "Cache npm dependencies"
-        uses: actions/cache@v5
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: ${{ runner.os }}-npm-
 
       - name: "Generate build ID"
         id: prep
@@ -92,68 +57,3 @@ jobs:
           push: true
           platforms: ${{ env.PLATFORM }}
           tags: ${{ steps.prep.outputs.full_image_path }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-#  trigger-update:
-#    name: "Trigger Kubernetes Repo Update"
-#    needs: [set-environment, build-and-push]
-#    runs-on: ubuntu-latest
-#    environment: ${{ needs.set-environment.outputs.env_name }}
-#
-#    env:
-#      SERVICE_NAME: ${{ vars.SERVICE_NAME }}
-#      ENV_NAME: ${{ vars.ENV_NAME }}
-#      GH_APP_CLIENT_ID: ${{ secrets.GH_APP_CLIENT_ID }}
-#      GH_APP_KEY: ${{ secrets.GH_APP_KEY }}
-#
-#    steps:
-#      - name: "Diagnostic Information"
-#        run: |
-#          echo "Triggering update for Service: ${{ env.SERVICE_NAME }}"
-#          echo "Target Environment: ${{ env.ENV_NAME }}"
-#          echo "Image to Deploy: ${{ needs.build-and-push.outputs.full_image_path }}"
-#          echo "Source Repo: ${{ github.repository }}"
-#          echo "Target Repo: ${{ env.K8S_REPO_OWNER }}/${{ env.K8S_REPO_NAME }}"
-#
-#      - name: "Generate GitHub App Token"
-#        id: github_app_token
-#        uses: actions/create-github-app-token@v3
-#        with:
-#          client-id: ${{ env.GH_APP_CLIENT_ID }}
-#          private-key: ${{ env.GH_APP_KEY }}
-#          owner: ${{ env.K8S_REPO_OWNER }}
-#          repositories: ${{ env.K8S_REPO_NAME }}
-#
-#      - name: "Trigger Kubernetes Repo Update"
-#        run: |
-#          TOKEN="${{ steps.github_app_token.outputs.token }}"
-#          API_URL="https://api.github.com/repos/${{ env.K8S_REPO_OWNER }}/${{ env.K8S_REPO_NAME }}/dispatches"
-#
-#          echo "Sending POST request to ${API_URL}"
-#          echo "Payload content: ${PAYLOAD}"
-#
-#          RESPONSE=$(curl -s -o response.txt -w "%{http_code}" -L \
-#            -X POST \
-#            -H "Accept: application/vnd.github+json" \
-#            -H "Authorization: Bearer ${TOKEN}" \
-#            -H "X-GitHub-Api-Version: 2026-03-10" \
-#            $API_URL \
-#            -d '{
-#              "event_type": "update-image-tag",
-#              "client_payload": {
-#                "full_image_path": "${{ needs.build-and-push.outputs.full_image_path }}",
-#                "service_name": "${{ env.SERVICE_NAME }}",
-#                "env_name": "${{ env.ENV_NAME }}",
-#                "source_sha": "${{ github.sha }}",
-#                "source_repo": "${{ github.repository }}"
-#              }
-#            }'
-#          )
-#
-#          if [ "$RESPONSE" -lt 200 ] || [ "$RESPONSE" -ge 300 ]; then
-#            echo "Error: Failed with status $RESPONSE"
-#            cat response.txt
-#            exit 1
-#          fi
-#          echo "Successfully triggered cross-repo update."
